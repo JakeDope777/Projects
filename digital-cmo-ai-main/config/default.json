@@ -1,0 +1,49 @@
+{
+  "app": {
+    "name": "Digital CMO AI",
+    "version": "0.1.0",
+    "environment": "development"
+  },
+  "brain": {
+    "default_model": "gpt-4",
+    "max_context_messages": 20,
+    "memory_retrieval_k": 5,
+    "intent_classification": "keyword"
+  },
+  "modules": {
+    "business_analysis": {
+      "enabled": true,
+      "max_search_results": 10,
+      "cache_ttl_seconds": 3600
+    },
+    "creative_design": {
+      "enabled": true,
+      "default_tone": "professional",
+      "default_copy_length": 200,
+      "image_generation": false
+    },
+    "crm_campaign": {
+      "enabled": true,
+      "default_crm": "hubspot",
+      "compliance_strict_mode": true
+    },
+    "analytics_reporting": {
+      "enabled": true,
+      "default_period_days": 30,
+      "forecast_method": "linear_trend"
+    },
+    "integrations": {
+      "enabled": true,
+      "rate_limit_per_minute": 100,
+      "retry_max_attempts": 3
+    }
+  },
+  "token_accounting": {
+    "free_tier_monthly": 10000,
+    "pro_tier_monthly": 100000,
+    "enterprise_tier_monthly": 1000000,
+    "cost_per_chat_message": 10,
+    "cost_per_analysis": 50,
+    "cost_per_creative": 30
+  }
+}
