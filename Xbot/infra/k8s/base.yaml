@@ -1,0 +1,133 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: xbot
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-api
+  namespace: xbot
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: gateway-api
+  template:
+    metadata:
+      labels:
+        app: gateway-api
+    spec:
+      containers:
+        - name: gateway-api
+          image: ghcr.io/example/xbot-gateway-api:latest
+          ports:
+            - containerPort: 4001
+          env:
+            - name: NODE_ENV
+              value: production
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-api
+  namespace: xbot
+spec:
+  selector:
+    app: gateway-api
+  ports:
+    - port: 80
+      targetPort: 4001
+  type: LoadBalancer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trading-orchestrator
+  namespace: xbot
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: trading-orchestrator
+  template:
+    metadata:
+      labels:
+        app: trading-orchestrator
+    spec:
+      containers:
+        - name: trading-orchestrator
+          image: ghcr.io/example/xbot-trading-orchestrator:latest
+          ports:
+            - containerPort: 4002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: execution-service
+  namespace: xbot
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: execution-service
+  template:
+    metadata:
+      labels:
+        app: execution-service
+    spec:
+      containers:
+        - name: execution-service
+          image: ghcr.io/example/xbot-execution-service:latest
+          ports:
+            - containerPort: 4003
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risk-policy-service
+  namespace: xbot
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: risk-policy-service
+  template:
+    metadata:
+      labels:
+        app: risk-policy-service
+    spec:
+      containers:
+        - name: risk-policy-service
+          image: ghcr.io/example/xbot-risk-policy-service:latest
+          ports:
+            - containerPort: 4004
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portfolio-analytics-service
+  namespace: xbot
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: portfolio-analytics-service
+  template:
+    metadata:
+      labels:
+        app: portfolio-analytics-service
+    spec:
+      containers:
+        - name: portfolio-analytics-service
+          image: ghcr.io/example/xbot-portfolio-analytics-service:latest
+          ports:
+            - containerPort: 4005
+

@@ -1,0 +1,35 @@
+{
+  "name": "xbot-trading-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/dashboard",
+    "apps/gateway-api",
+    "apps/trading-orchestrator",
+    "apps/execution-service",
+    "apps/risk-policy-service",
+    "apps/portfolio-analytics-service",
+    "apps/worker-service",
+    "packages/shared-contracts",
+    "packages/shared-events",
+    "packages/shared-risk"
+  ],
+  "scripts": {
+    "dev:gateway": "npm run dev --workspace apps/gateway-api",
+    "dev:orchestrator": "npm run dev --workspace apps/trading-orchestrator",
+    "dev:execution": "npm run dev --workspace apps/execution-service",
+    "dev:risk": "npm run dev --workspace apps/risk-policy-service",
+    "dev:analytics": "npm run dev --workspace apps/portfolio-analytics-service",
+    "dev:worker": "npm run dev --workspace apps/worker-service",
+    "dev:dashboard": "npm run dev --workspace apps/dashboard",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.8",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.7"
+  }
+}
+

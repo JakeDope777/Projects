@@ -1,0 +1,86 @@
+:root {
+  --bg: #0b111f;
+  --surface: #121c31;
+  --surface-2: #182543;
+  --text: #d9e3ff;
+  --muted: #9db0e3;
+  --accent: #5cd4ff;
+  --success: #53d769;
+  --danger: #ff6b6b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at 20% 10%, #1e2b53 0%, #0b111f 45%),
+    radial-gradient(circle at 90% 90%, #13315a 0%, #0b111f 40%);
+  color: var(--text);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.container {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.grid.cards {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.card {
+  background: linear-gradient(160deg, var(--surface), var(--surface-2));
+  border: 1px solid #24365f;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.pill {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #1c2d53;
+  border: 1px solid #2e4578;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.danger {
+  color: var(--danger);
+}
+
+.success {
+  color: var(--success);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .container {
+    padding: 14px;
+  }
+}
+
