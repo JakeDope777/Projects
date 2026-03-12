@@ -30,6 +30,10 @@ function requiresApproval(order: OrderRequest, mode: string): boolean {
   return order.requires_approval;
 }
 
+function isTradingHalted(mode: string): boolean {
+  return mode === "halted";
+}
+
 let autonomyMode = process.env.DEFAULT_AUTONOMY_MODE ?? "approval_required";
 
 server.get("/health", async () => {
@@ -106,6 +110,13 @@ server.post("/v1/approvals/decision", async (request, reply) => {
       request_id: decision.request_id,
       status: "rejected"
     };
+  }
+
+  if (isTradingHalted(autonomyMode)) {
+    return reply.code(423).send({
+      error: "trading_halted",
+      message: "Kill switch is active; resume trading before approving orders."
+    });
   }
 
   try {
@@ -196,6 +207,39 @@ server.post("/v1/orders/create", async (request, reply) => {
   };
 
   const mode = order.autonomy_mode ?? autonomyMode;
+  if (isTradingHalted(mode)) {
+    await store.upsertOrder(payload, "blocked_by_risk");
+    await events.publish(
+      createEventEnvelope(
+        "execution-service",
+        "risk.alert.v1",
+        payload.correlation_id,
+        "risk-policy-v1",
+        {
+          request_id: requestId,
+          reason: "trading_halted"
+        }
+      )
+    );
+    await ledger.append(
+      createEventEnvelope(
+        "execution-service",
+        "risk.alert.v1",
+        payload.correlation_id,
+        "risk-policy-v1",
+        {
+          request_id: requestId,
+          reason: "trading_halted"
+        }
+      )
+    );
+    return reply.code(423).send({
+      request_id: requestId,
+      status: "blocked_by_risk",
+      error: "trading_halted"
+    });
+  }
+
   if (requiresApproval(payload, mode)) {
     await store.upsertOrder(payload, "pending_approval");
 

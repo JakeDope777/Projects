@@ -33,6 +33,8 @@ Base URL (Gateway): `http://localhost:4001`
 - `PUT /v1/risk/presets/:name`
 - `GET /v1/autonomy/mode`
 - `PUT /v1/autonomy/mode`
+- `POST /v1/autonomy/kill-switch`
+- `POST /v1/autonomy/resume`
 - `GET /v1/autonomy/gate`
 
 ## Approvals

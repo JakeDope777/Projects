@@ -78,9 +78,48 @@ a {
   color: var(--muted);
 }
 
+.btn {
+  border: 1px solid #2e4578;
+  background: #1a2a4c;
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn.primary {
+  border-color: #1d7da2;
+  background: #124966;
+}
+
+.btn.danger-btn {
+  border-color: #8f2c2c;
+  background: #5c1f1f;
+}
+
+.input {
+  min-width: 240px;
+  border: 1px solid #2e4578;
+  background: #101c35;
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+
+.card-lite {
+  border: 1px solid #2a3d69;
+  border-radius: 12px;
+  padding: 12px;
+  background: #101a30;
+}
+
 @media (max-width: 640px) {
   .container {
     padding: 14px;
   }
 }
-

@@ -60,20 +60,8 @@ server.get("/v1/autonomy/mode", async () => {
   return { mode: autonomyMode };
 });
 
-server.put("/v1/autonomy/mode", async (request, reply) => {
-  const body = z.object({ mode: z.enum(["approval_required", "paper_autonomous", "live_autonomous", "halted"]) }).parse(request.body);
-
-  if (body.mode === "live_autonomous") {
-    const gate = evaluateAutonomyGate(latestMetrics);
-    if (!gate.passed) {
-      return reply.code(409).send({
-        error: "autonomy_gate_not_passed",
-        failures: gate.failures
-      });
-    }
-  }
-
-  autonomyMode = body.mode;
+async function persistAndBroadcastModeChange(mode: AutonomyMode) {
+  autonomyMode = mode;
   await store.setMode(autonomyMode);
   await fetch(`${urls.execution}/v1/internal/autonomy-mode`, {
     method: "PUT",
@@ -99,8 +87,91 @@ server.put("/v1/autonomy/mode", async (request, reply) => {
       { mode: autonomyMode }
     )
   );
+}
 
+server.put("/v1/autonomy/mode", async (request, reply) => {
+  const body = z.object({ mode: z.enum(["approval_required", "paper_autonomous", "live_autonomous", "halted"]) }).parse(request.body);
+
+  if (body.mode === "live_autonomous") {
+    const gate = evaluateAutonomyGate(latestMetrics);
+    if (!gate.passed) {
+      return reply.code(409).send({
+        error: "autonomy_gate_not_passed",
+        failures: gate.failures
+      });
+    }
+  }
+
+  await persistAndBroadcastModeChange(body.mode);
   return { mode: autonomyMode };
+});
+
+server.post("/v1/autonomy/kill-switch", async (request) => {
+  const body = z
+    .object({
+      reason: z.string().min(3).default("manual_kill_switch")
+    })
+    .parse(request.body);
+
+  await persistAndBroadcastModeChange("halted");
+
+  await events.publish(
+    createEventEnvelope(
+      "trading-orchestrator",
+      "risk.alert.v1",
+      randomUUID(),
+      "risk-policy-v1",
+      {
+        reason: body.reason,
+        action: "kill_switch_activated"
+      }
+    )
+  );
+  await ledger.append(
+    createEventEnvelope(
+      "trading-orchestrator",
+      "risk.alert.v1",
+      randomUUID(),
+      "risk-policy-v1",
+      {
+        reason: body.reason,
+        action: "kill_switch_activated"
+      }
+    )
+  );
+
+  return {
+    mode: autonomyMode,
+    reason: body.reason,
+    status: "halted"
+  };
+});
+
+server.post("/v1/autonomy/resume", async (request) => {
+  const body = z
+    .object({
+      mode: z
+        .enum(["approval_required", "paper_autonomous", "live_autonomous"])
+        .default("approval_required")
+    })
+    .parse(request.body);
+
+  if (body.mode === "live_autonomous") {
+    const gate = evaluateAutonomyGate(latestMetrics);
+    if (!gate.passed) {
+      return {
+        mode: autonomyMode,
+        resumed: false,
+        failures: gate.failures
+      };
+    }
+  }
+
+  await persistAndBroadcastModeChange(body.mode);
+  return {
+    mode: autonomyMode,
+    resumed: true
+  };
 });
 
 server.get("/v1/autonomy/gate", async () => {

@@ -10,8 +10,11 @@
 ## Incident Controls
 
 - **Hard halt:** set autonomy mode to `halted`.
+- **Kill switch API:** `POST /v1/autonomy/kill-switch` with a reason.
 - **Kill switch:** stop `execution-service` and `worker-service`.
 - **Risk breach:** reject pending approvals and lock new order submission.
+
+When mode is `halted`, new order requests and approval-to-execution transitions are blocked.
 
 ## 30-Day Autonomy Gate
 
@@ -28,4 +31,3 @@ Promotion from `approval_required` to `live_autonomous` requires:
 - Ledger remains treasury/cold storage.
 - Bot uses capped hot wallet for continuous execution.
 - Refill flow is manual and audited.
-

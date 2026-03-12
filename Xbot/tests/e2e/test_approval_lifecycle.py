@@ -57,3 +57,23 @@ def test_order_requires_approval_then_can_be_rejected():
     )
     assert decision_payload["status"] == "rejected"
 
+
+def test_kill_switch_blocks_new_orders():
+    _post("/v1/autonomy/kill-switch", {"reason": "e2e_safety_test"})
+
+    status, payload = _post(
+        "/v1/orders/create",
+        {
+            "market_id": "poly-pres-2028-win",
+            "side": "buy",
+            "quantity": 2,
+            "limit_price": 0.57,
+            "strategy_id": "hybrid_v1",
+            "confidence": 0.7
+        }
+    )
+    assert status == 423
+    assert payload["status"] == "blocked_by_risk"
+    assert payload["error"] == "trading_halted"
+
+    _post("/v1/autonomy/resume", {"mode": "approval_required"})

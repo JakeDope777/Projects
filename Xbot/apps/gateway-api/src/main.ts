@@ -224,6 +224,25 @@ server.put("/v1/autonomy/mode", async (request, reply) => {
   return reply.code(status).send(payload);
 });
 
+server.post("/v1/autonomy/kill-switch", async (request, reply) => {
+  const { status, payload } = await proxyPost(
+    `${urls.orchestrator}/v1/autonomy/kill-switch`,
+    request.body
+  );
+  publishChannelEvent("risk.alert", payload);
+  publishChannelEvent("autonomy.state_changed", payload);
+  return reply.code(status).send(payload);
+});
+
+server.post("/v1/autonomy/resume", async (request, reply) => {
+  const { status, payload } = await proxyPost(
+    `${urls.orchestrator}/v1/autonomy/resume`,
+    request.body
+  );
+  publishChannelEvent("autonomy.state_changed", payload);
+  return reply.code(status).send(payload);
+});
+
 server.get("/v1/autonomy/gate", async (_, reply) => {
   const { status, payload } = await proxyGet(`${urls.orchestrator}/v1/autonomy/gate`);
   return reply.code(status).send(payload);
@@ -234,7 +253,11 @@ server.post("/v1/approvals/decision", async (request, reply) => {
     `${urls.execution}/v1/approvals/decision`,
     request.body
   );
-  publishChannelEvent("approval.required", payload);
+  if (payload?.status === "rejected") {
+    publishChannelEvent("risk.alert", payload);
+  } else {
+    publishChannelEvent("order.executed", payload);
+  }
   return reply.code(status).send(payload);
 });
 
