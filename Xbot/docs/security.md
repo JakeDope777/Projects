@@ -3,8 +3,13 @@
 ## Auth and Access
 
 - JWT-based API auth with short-lived access tokens.
+- Refresh-token flow for session continuation.
 - Role model scaffold: `admin`, `agent`, `viewer`.
 - Approval-required order mode enabled by default.
+- Route-level RBAC in gateway:
+  - `admin`: full control including kill switch and risk preset updates.
+  - `agent`: trading operations except admin-only controls.
+  - `viewer`: read-only endpoints.
 
 ## Secrets and Keys
 
@@ -24,4 +29,3 @@
 - SSO and centralized policy enforcement.
 - Secret rotation automation.
 - Signed audit exports with integrity checks.
-

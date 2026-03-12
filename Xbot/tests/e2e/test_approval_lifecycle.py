@@ -1,32 +1,51 @@
 import json
 import os
 import urllib.request
+from typing import Optional
 
 import pytest
 
 BASE_URL = os.getenv("XBOT_GATEWAY_URL")
+OPERATOR_EMAIL = os.getenv("XBOT_OPERATOR_EMAIL", "operator@xbot.local")
+OPERATOR_PASSWORD = os.getenv("XBOT_OPERATOR_PASSWORD", "ChangeMe!123")
 pytestmark = pytest.mark.skipif(
     not BASE_URL, reason="Set XBOT_GATEWAY_URL to run live E2E tests."
 )
 
 
-def _post(path: str, payload: dict):
+def _post(path: str, payload: dict, token: Optional[str] = None):
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(
         f"{BASE_URL}{path}",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST"
     )
     with urllib.request.urlopen(req, timeout=5) as response:
         return response.status, json.loads(response.read().decode("utf-8"))
 
 
-def _get(path: str):
-    with urllib.request.urlopen(f"{BASE_URL}{path}", timeout=5) as response:
+def _get(path: str, token: Optional[str] = None):
+    req = urllib.request.Request(
+        f"{BASE_URL}{path}",
+        headers={"Authorization": f"Bearer {token}"} if token else {}
+    )
+    with urllib.request.urlopen(req, timeout=5) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
+def _login() -> str:
+    _, payload = _post(
+        "/v1/auth/login",
+        {"email": OPERATOR_EMAIL, "password": OPERATOR_PASSWORD}
+    )
+    return payload["access_token"]
+
+
 def test_order_requires_approval_then_can_be_rejected():
+    token = _login()
     status, create_payload = _post(
         "/v1/orders/create",
         {
@@ -37,12 +56,13 @@ def test_order_requires_approval_then_can_be_rejected():
             "strategy_id": "hybrid_v1",
             "confidence": 0.8,
             "requires_approval": True
-        }
+        },
+        token
     )
     assert status == 202
     assert create_payload["status"] == "pending_approval"
 
-    pending = _get("/v1/approvals/pending")
+    pending = _get("/v1/approvals/pending", token)
     assert pending["count"] >= 1
 
     _, decision_payload = _post(
@@ -53,13 +73,15 @@ def test_order_requires_approval_then_can_be_rejected():
             "approved": False,
             "actor_id": "operator_test",
             "reason": "risk_check"
-        }
+        },
+        token
     )
     assert decision_payload["status"] == "rejected"
 
 
 def test_kill_switch_blocks_new_orders():
-    _post("/v1/autonomy/kill-switch", {"reason": "e2e_safety_test"})
+    token = _login()
+    _post("/v1/autonomy/kill-switch", {"reason": "e2e_safety_test"}, token)
 
     status, payload = _post(
         "/v1/orders/create",
@@ -70,10 +92,11 @@ def test_kill_switch_blocks_new_orders():
             "limit_price": 0.57,
             "strategy_id": "hybrid_v1",
             "confidence": 0.7
-        }
+        },
+        token
     )
     assert status == 423
     assert payload["status"] == "blocked_by_risk"
     assert payload["error"] == "trading_halted"
 
-    _post("/v1/autonomy/resume", {"mode": "approval_required"})
+    _post("/v1/autonomy/resume", {"mode": "approval_required"}, token)

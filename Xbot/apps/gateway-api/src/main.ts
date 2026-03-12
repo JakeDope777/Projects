@@ -1,8 +1,20 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
+import bcrypt from "bcryptjs";
+import jwt, { type JwtPayload } from "jsonwebtoken";
 import { z } from "zod";
 import type { HealthResponse } from "@xbot/shared-contracts";
+
+type Role = "admin" | "agent" | "viewer";
+type TokenKind = "access" | "refresh";
+
+interface AuthTokenPayload extends JwtPayload {
+  sub: string;
+  email: string;
+  role: Role;
+  kind: TokenKind;
+}
 
 const server = Fastify({ logger: true });
 
@@ -14,12 +26,101 @@ const urls = {
   marketData: process.env.MARKET_DATA_URL ?? "http://localhost:8002"
 };
 
+const authRequired = process.env.AUTH_REQUIRED !== "false";
+const jwtSecret = process.env.JWT_SECRET ?? "dev_jwt_secret_change_me";
+const accessTokenTtlSeconds = Number(
+  process.env.ACCESS_TOKEN_TTL_SECONDS ?? "3600"
+);
+const refreshTokenTtlSeconds = Number(
+  process.env.REFRESH_TOKEN_TTL_SECONDS ?? "604800"
+);
+const operator = {
+  id: process.env.OPERATOR_ID ?? "user_internal_operator",
+  email: process.env.OPERATOR_EMAIL ?? "operator@xbot.local",
+  role: (process.env.OPERATOR_ROLE as Role | undefined) ?? "admin",
+  password: process.env.OPERATOR_PASSWORD ?? "ChangeMe!123",
+  passwordHash: process.env.OPERATOR_PASSWORD_HASH
+};
+
 await server.register(cors, { origin: true });
 await server.register(websocket);
 
 const wsClients = new Set<any>();
 
-function publishChannelEvent(channel: string, data: Record<string, unknown>) {
+const publicRoutes = new Set([
+  "/health",
+  "/v1/auth/login",
+  "/v1/auth/refresh",
+  "/v1/auth/logout"
+]);
+
+const adminOnly = [
+  { method: "POST", path: "/v1/autonomy/kill-switch" },
+  { method: "POST", path: "/v1/autonomy/resume" },
+  { method: "POST", path: "/v1/ws/broadcast" },
+  { method: "PUT", path: "/v1/autonomy/mode" },
+  { method: "PUT", pathPrefix: "/v1/risk/presets/" }
+] as const;
+
+function toPath(url: string) {
+  return url.split("?")[0];
+}
+
+function createToken(payload: Omit<AuthTokenPayload, "kind">, kind: TokenKind) {
+  return jwt.sign(
+    {
+      ...payload,
+      kind
+    },
+    jwtSecret,
+    {
+      expiresIn: kind === "access" ? accessTokenTtlSeconds : refreshTokenTtlSeconds
+    }
+  );
+}
+
+function verifyToken(rawToken: string, expectedKind: TokenKind): AuthTokenPayload | null {
+  try {
+    const decoded = jwt.verify(rawToken, jwtSecret) as AuthTokenPayload;
+    if (decoded.kind !== expectedKind) return null;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+function extractBearerToken(authorizationHeader?: string) {
+  if (!authorizationHeader) return null;
+  const [scheme, token] = authorizationHeader.split(" ");
+  if (scheme !== "Bearer" || !token) return null;
+  return token;
+}
+
+function isAdminOnlyRoute(method: string, path: string) {
+  return adminOnly.some((rule) => {
+    if (rule.method !== method) return false;
+    if ("path" in rule) {
+      return rule.path === path;
+    }
+    return path.startsWith(rule.pathPrefix);
+  });
+}
+
+function roleAllowsRoute(role: Role, method: string, path: string) {
+  if (role === "admin") return true;
+  if (isAdminOnlyRoute(method, path)) return false;
+  if (method === "GET") return true;
+  return role === "agent";
+}
+
+async function verifyOperatorPassword(password: string) {
+  if (operator.passwordHash) {
+    return bcrypt.compare(password, operator.passwordHash);
+  }
+  return password === operator.password;
+}
+
+function publishChannelEvent(channel: string, data: unknown) {
   const message = JSON.stringify({
     channel,
     timestamp: new Date().toISOString(),
@@ -29,18 +130,6 @@ function publishChannelEvent(channel: string, data: Record<string, unknown>) {
     client.send(message);
   }
 }
-
-server.get("/v1/ws", { websocket: true }, (socket) => {
-  wsClients.add(socket);
-  socket.send(
-    JSON.stringify({
-      channel: "connection_established",
-      timestamp: new Date().toISOString(),
-      data: { status: "ok" }
-    })
-  );
-  socket.on("close", () => wsClients.delete(socket));
-});
 
 async function proxyGet(url: string) {
   const response = await fetch(url);
@@ -67,6 +156,64 @@ async function proxyPut(url: string, body: unknown) {
   const payload = await response.json();
   return { status: response.status, payload };
 }
+
+server.addHook("preHandler", async (request, reply) => {
+  const path = toPath(request.url);
+  const method = request.method.toUpperCase();
+
+  if (!authRequired || publicRoutes.has(path)) {
+    return;
+  }
+
+  const token = extractBearerToken(request.headers.authorization);
+  if (!token) {
+    return reply.code(401).send({
+      error: "missing_token"
+    });
+  }
+
+  const payload = verifyToken(token, "access");
+  if (!payload) {
+    return reply.code(401).send({
+      error: "invalid_or_expired_token"
+    });
+  }
+
+  if (!roleAllowsRoute(payload.role, method, path)) {
+    return reply.code(403).send({
+      error: "insufficient_role",
+      role: payload.role
+    });
+  }
+});
+
+server.get("/v1/ws", { websocket: true }, (socket, request) => {
+  if (authRequired) {
+    const queryToken = (request.query as { token?: string }).token;
+    const token = queryToken ?? extractBearerToken(request.headers.authorization);
+    if (!token || !verifyToken(token, "access")) {
+      socket.send(
+        JSON.stringify({
+          channel: "connection_error",
+          timestamp: new Date().toISOString(),
+          data: { error: "unauthorized" }
+        })
+      );
+      socket.close(4001, "unauthorized");
+      return;
+    }
+  }
+
+  wsClients.add(socket);
+  socket.send(
+    JSON.stringify({
+      channel: "connection_established",
+      timestamp: new Date().toISOString(),
+      data: { status: "ok" }
+    })
+  );
+  socket.on("close", () => wsClients.delete(socket));
+});
 
 server.get("/health", async () => {
   const checks: Record<string, string> = {};
@@ -97,27 +244,90 @@ server.post("/v1/auth/login", async (request, reply) => {
     })
     .parse(request.body);
 
+  const validEmail = body.email.toLowerCase() === operator.email.toLowerCase();
+  const validPassword = await verifyOperatorPassword(body.password);
+  if (!validEmail || !validPassword) {
+    return reply.code(401).send({ error: "invalid_credentials" });
+  }
+
+  const tokenPayload = {
+    sub: operator.id,
+    email: operator.email,
+    role: operator.role
+  };
+  const accessToken = createToken(tokenPayload, "access");
+  const refreshToken = createToken(tokenPayload, "refresh");
+
   return reply.send({
     user: {
-      id: "user_internal_operator",
-      email: body.email,
-      role: "admin"
+      id: operator.id,
+      email: operator.email,
+      role: operator.role
     },
-    access_token: "dev_access_token",
-    refresh_token: "dev_refresh_token",
-    expires_in_seconds: 3600
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    expires_in_seconds: accessTokenTtlSeconds
   });
 });
 
-server.post("/v1/auth/refresh", async () => {
+server.post("/v1/auth/refresh", async (request, reply) => {
+  const body = z
+    .object({
+      refresh_token: z.string().min(10)
+    })
+    .parse(request.body);
+
+  const decoded = verifyToken(body.refresh_token, "refresh");
+  if (!decoded) {
+    return reply.code(401).send({ error: "invalid_refresh_token" });
+  }
+
+  const accessToken = createToken(
+    {
+      sub: decoded.sub,
+      email: decoded.email,
+      role: decoded.role
+    },
+    "access"
+  );
+
   return {
-    access_token: "dev_access_token_refreshed",
-    expires_in_seconds: 3600
+    access_token: accessToken,
+    expires_in_seconds: accessTokenTtlSeconds
   };
 });
 
 server.post("/v1/auth/logout", async () => {
   return { ok: true };
+});
+
+server.get("/v1/auth/me", async (request, reply) => {
+  if (!authRequired) {
+    return {
+      user: {
+        id: operator.id,
+        email: operator.email,
+        role: operator.role
+      },
+      auth_required: false
+    };
+  }
+  const token = extractBearerToken(request.headers.authorization);
+  if (!token) {
+    return reply.code(401).send({ error: "missing_token" });
+  }
+  const payload = verifyToken(token, "access");
+  if (!payload) {
+    return reply.code(401).send({ error: "invalid_or_expired_token" });
+  }
+  return {
+    user: {
+      id: payload.sub,
+      email: payload.email,
+      role: payload.role
+    },
+    auth_required: true
+  };
 });
 
 server.get("/v1/markets", async (_, reply) => {
@@ -302,3 +512,4 @@ server.get("/v1/analytics/risk", async (_, reply) => {
 
 const port = Number(process.env.PORT ?? "4001");
 await server.listen({ host: "0.0.0.0", port });
+

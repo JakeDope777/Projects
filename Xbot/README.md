@@ -57,6 +57,12 @@ Execution safety controls:
 - To allow live venue calls: set `EXECUTION_MODE=live` and `POLYMARKET_ALLOW_LIVE=true`.
 - Live mode also requires `POLYMARKET_PRIVATE_KEY`.
 
+Auth defaults for local development:
+
+- Email: `operator@xbot.local`
+- Password: `ChangeMe!123`
+- Set `AUTH_REQUIRED=false` only for local debugging without auth.
+
 ## Verification
 
 - JS type checks: `npm run typecheck`

@@ -6,6 +6,8 @@ Base URL (Gateway): `http://localhost:4001`
 
 - `POST /v1/auth/login`
 - `POST /v1/auth/refresh`
+- `POST /v1/auth/logout`
+- `GET /v1/auth/me`
 
 ## Markets
 

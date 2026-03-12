@@ -5,6 +5,8 @@ import urllib.request
 import pytest
 
 BASE_URL = os.getenv("XBOT_GATEWAY_URL")
+OPERATOR_EMAIL = os.getenv("XBOT_OPERATOR_EMAIL", "operator@xbot.local")
+OPERATOR_PASSWORD = os.getenv("XBOT_OPERATOR_PASSWORD", "ChangeMe!123")
 pytestmark = pytest.mark.skipif(
     not BASE_URL, reason="Set XBOT_GATEWAY_URL to run live integration tests."
 )
@@ -35,8 +37,7 @@ def test_health_contract():
 def test_login_contract():
     _, payload = _post(
         "/v1/auth/login",
-        {"email": "operator@xbot.local", "password": "StrongPass!123"}
+        {"email": OPERATOR_EMAIL, "password": OPERATOR_PASSWORD}
     )
     assert "access_token" in payload
     assert payload["user"]["role"] == "admin"
-
