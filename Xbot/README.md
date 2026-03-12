@@ -51,6 +51,12 @@ Xbot is a trading-first autonomous bot platform designed for internal use with a
 6. Run smoke checks:
    - `./scripts/smoke_check.sh`
 
+Execution safety controls:
+
+- `EXECUTION_MODE=paper` keeps order flow simulated.
+- To allow live venue calls: set `EXECUTION_MODE=live` and `POLYMARKET_ALLOW_LIVE=true`.
+- Live mode also requires `POLYMARKET_PRIVATE_KEY`.
+
 ## Verification
 
 - JS type checks: `npm run typecheck`
@@ -63,6 +69,7 @@ This implementation establishes a production-oriented baseline with:
 
 - Versioned event envelope (`*.v1`) and contract schemas.
 - Full v1 endpoint surfaces and service stubs.
+- Postgres-backed persistence (with memory fallback) for orders/approvals, risk state, positions, and autonomy state.
 - Risk policy engine, approval flow hooks, and autonomy gate evaluator.
-- Polymarket-first execution adapter interface with live-safe guardrails.
+- Polymarket-first execution adapter with explicit paper/live mode controls and fail-safe defaults.
 - Unit/integration starter tests and deployment scaffolding.

@@ -23,6 +23,12 @@
 - `portfolio-analytics-service`: Position state, PnL, and KPI aggregates.
 - `worker-service`: Async jobs (replay, reports, backfills, evaluations).
 
+## Persistence Model
+
+- Primary state store: PostgreSQL (`POSTGRES_URL`) for orders, approvals, risk presets, positions, autonomy mode, and gate metrics.
+- Fail-safe fallback: each service degrades to in-memory mode if PostgreSQL is unavailable.
+- Immutable event trace: JSONL decision ledger for audit reconstruction.
+
 ## Event Envelope
 
 All service bus events use:
@@ -47,4 +53,3 @@ All service bus events use:
      - positive risk-adjusted return
      - drawdown under policy
      - zero critical violations
-

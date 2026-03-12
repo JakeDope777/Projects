@@ -10,12 +10,15 @@ Base URL (Gateway): `http://localhost:4001`
 ## Markets
 
 - `GET /v1/markets`
+- `GET /v1/markets/:marketId/orderbook`
+- `GET /v1/markets/:marketId/features`
 
 ## Signals and Orders
 
 - `POST /v1/signals/generate`
 - `POST /v1/orders/create`
 - `POST /v1/orders/cancel`
+- `GET /v1/orders/:requestId`
 
 ## Portfolio and Analytics
 
@@ -36,4 +39,3 @@ Base URL (Gateway): `http://localhost:4001`
 
 - `GET /v1/approvals/pending`
 - `POST /v1/approvals/decision`
-

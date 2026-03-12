@@ -13,6 +13,7 @@ import type {
   OrderRequest
 } from "@xbot/shared-contracts";
 import { PolymarketAdapter } from "./venues/polymarket-adapter.js";
+import { createExecutionStore } from "./store.js";
 
 const server = Fastify({ logger: true });
 await server.register(cors, { origin: true });
@@ -22,9 +23,7 @@ const events = new InMemoryEventBus();
 const ledger = new JsonlLedger(
   process.env.LEDGER_PATH ?? "/tmp/xbot-decision-ledger.jsonl"
 );
-
-const approvals = new Map<string, { request: OrderRequest; created_at: string }>();
-const orderStatus = new Map<string, string>();
+const store = await createExecutionStore();
 
 function requiresApproval(order: OrderRequest, mode: string): boolean {
   if (mode === "approval_required") return true;
@@ -34,23 +33,36 @@ function requiresApproval(order: OrderRequest, mode: string): boolean {
 let autonomyMode = process.env.DEFAULT_AUTONOMY_MODE ?? "approval_required";
 
 server.get("/health", async () => {
+  const persistenceHealthy = await store.isHealthy();
   const payload: HealthResponse = {
-    status: "healthy",
+    status: persistenceHealthy ? "healthy" : "degraded",
     version: "0.1.0",
     timestamp: new Date().toISOString(),
     checks: {
       adapter: "healthy",
-      event_bus: "healthy"
+      event_bus: "healthy",
+      persistence: persistenceHealthy ? "healthy" : "degraded",
+      store_backend: store.backend
     }
   };
   return payload;
 });
 
 server.get("/v1/approvals/pending", async () => {
+  const pending = await store.listPendingApprovals();
   return {
-    count: approvals.size,
-    items: Array.from(approvals.values())
+    count: pending.length,
+    items: pending
   };
+});
+
+server.get("/v1/orders/:requestId", async (request, reply) => {
+  const { requestId } = request.params as { requestId: string };
+  const status = await store.getOrderStatus(requestId);
+  if (!status) {
+    return reply.code(404).send({ error: "order_not_found" });
+  }
+  return { request_id: requestId, status };
 });
 
 server.post("/v1/approvals/decision", async (request, reply) => {
@@ -65,14 +77,17 @@ server.post("/v1/approvals/decision", async (request, reply) => {
     })
     .parse(request.body) as ApprovalDecision;
 
-  const pending = approvals.get(decision.request_id);
+  const pending = await store.getPendingApproval(decision.request_id);
   if (!pending) {
     return reply.code(404).send({ error: "approval_request_not_found" });
   }
 
   if (!decision.approved) {
-    orderStatus.set(decision.request_id, "rejected");
-    approvals.delete(decision.request_id);
+    await store.saveApproval({
+      ...decision,
+      decided_at: decision.decided_at ?? new Date().toISOString()
+    });
+    await store.setOrderStatus(decision.request_id, "rejected");
     await events.publish(
       createEventEnvelope("execution-service", "approval.rejected.v1", decision.request_id, "risk-policy-v1", {
         approval_id: decision.approval_id,
@@ -93,29 +108,58 @@ server.post("/v1/approvals/decision", async (request, reply) => {
     };
   }
 
-  const executed = await adapter.createOrder(pending.request);
-  approvals.delete(decision.request_id);
-  orderStatus.set(decision.request_id, executed.status);
-  await events.publish(
-    createEventEnvelope("execution-service", "order.executed.v1", decision.request_id, "risk-policy-v1", {
+  try {
+    const executed = await adapter.createOrder(pending.request);
+    await store.saveApproval({
+      ...decision,
+      decided_at: decision.decided_at ?? new Date().toISOString()
+    });
+    await store.setOrderStatus(
+      decision.request_id,
+      executed.status,
+      executed.venue_order_id
+    );
+    await events.publish(
+      createEventEnvelope("execution-service", "order.executed.v1", decision.request_id, "risk-policy-v1", {
+        request_id: decision.request_id,
+        venue_order_id: executed.venue_order_id,
+        status: executed.status
+      })
+    );
+    await ledger.append(
+      createEventEnvelope("execution-service", "order.executed.v1", decision.request_id, "risk-policy-v1", {
+        request_id: decision.request_id,
+        venue_order_id: executed.venue_order_id,
+        status: executed.status
+      })
+    );
+    return {
       request_id: decision.request_id,
-      venue_order_id: executed.venue_order_id,
-      status: executed.status
-    })
-  );
-  await ledger.append(
-    createEventEnvelope("execution-service", "order.executed.v1", decision.request_id, "risk-policy-v1", {
+      approval_id: decision.approval_id,
+      status: executed.status,
+      venue_order_id: executed.venue_order_id
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "execution_failure";
+    await store.setOrderStatus(decision.request_id, "failed");
+    await events.publish(
+      createEventEnvelope("execution-service", "order.failed.v1", decision.request_id, "risk-policy-v1", {
+        request_id: decision.request_id,
+        error: message
+      })
+    );
+    await ledger.append(
+      createEventEnvelope("execution-service", "order.failed.v1", decision.request_id, "risk-policy-v1", {
+        request_id: decision.request_id,
+        error: message
+      })
+    );
+    return reply.code(502).send({
       request_id: decision.request_id,
-      venue_order_id: executed.venue_order_id,
-      status: executed.status
-    })
-  );
-  return {
-    request_id: decision.request_id,
-    approval_id: decision.approval_id,
-    status: executed.status,
-    venue_order_id: executed.venue_order_id
-  };
+      status: "failed",
+      error: message
+    });
+  }
 });
 
 server.post("/v1/orders/create", async (request, reply) => {
@@ -153,11 +197,7 @@ server.post("/v1/orders/create", async (request, reply) => {
 
   const mode = order.autonomy_mode ?? autonomyMode;
   if (requiresApproval(payload, mode)) {
-    approvals.set(requestId, {
-      request: payload,
-      created_at: new Date().toISOString()
-    });
-    orderStatus.set(requestId, "pending_approval");
+    await store.upsertOrder(payload, "pending_approval");
 
     await events.publish(
       createEventEnvelope("execution-service", "approval.required.v1", payload.correlation_id, "risk-policy-v1", {
@@ -181,28 +221,51 @@ server.post("/v1/orders/create", async (request, reply) => {
     });
   }
 
-  const executed = await adapter.createOrder(payload);
-  orderStatus.set(requestId, executed.status);
-  await events.publish(
-    createEventEnvelope("execution-service", "order.executed.v1", payload.correlation_id, "risk-policy-v1", {
-      request_id: requestId,
-      venue_order_id: executed.venue_order_id,
-      status: executed.status
-    })
-  );
-  await ledger.append(
-    createEventEnvelope("execution-service", "order.executed.v1", payload.correlation_id, "risk-policy-v1", {
-      request_id: requestId,
-      venue_order_id: executed.venue_order_id,
-      status: executed.status
-    })
-  );
+  try {
+    const executed = await adapter.createOrder(payload);
+    await store.upsertOrder(payload, executed.status, executed.venue_order_id);
+    await events.publish(
+      createEventEnvelope("execution-service", "order.executed.v1", payload.correlation_id, "risk-policy-v1", {
+        request_id: requestId,
+        venue_order_id: executed.venue_order_id,
+        status: executed.status
+      })
+    );
+    await ledger.append(
+      createEventEnvelope("execution-service", "order.executed.v1", payload.correlation_id, "risk-policy-v1", {
+        request_id: requestId,
+        venue_order_id: executed.venue_order_id,
+        status: executed.status
+      })
+    );
 
-  return reply.code(201).send({
-    request_id: requestId,
-    status: executed.status,
-    venue_order_id: executed.venue_order_id
-  });
+    return reply.code(201).send({
+      request_id: requestId,
+      status: executed.status,
+      venue_order_id: executed.venue_order_id
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "execution_failure";
+    await store.upsertOrder(payload, "failed");
+    await events.publish(
+      createEventEnvelope("execution-service", "order.failed.v1", payload.correlation_id, "risk-policy-v1", {
+        request_id: requestId,
+        error: message
+      })
+    );
+    await ledger.append(
+      createEventEnvelope("execution-service", "order.failed.v1", payload.correlation_id, "risk-policy-v1", {
+        request_id: requestId,
+        error: message
+      })
+    );
+    return reply.code(502).send({
+      request_id: requestId,
+      status: "failed",
+      error: message
+    });
+  }
 });
 
 server.post("/v1/orders/cancel", async (request, reply) => {

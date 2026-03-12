@@ -9,6 +9,7 @@ import type {
   AutonomyMode,
   HealthResponse
 } from "@xbot/shared-contracts";
+import { createOrchestratorStore } from "./store.js";
 
 const server = Fastify({ logger: true });
 await server.register(cors, { origin: true });
@@ -25,7 +26,7 @@ const urls = {
 
 let autonomyMode: AutonomyMode = "approval_required";
 
-let latestMetrics: AutonomyGateMetrics = {
+const defaultMetrics: AutonomyGateMetrics = {
   window_days: 30,
   sharpe_like_ratio: 0.0,
   cumulative_return_pct: 0.0,
@@ -33,14 +34,23 @@ let latestMetrics: AutonomyGateMetrics = {
   critical_violations: 0,
   evaluated_at: new Date().toISOString()
 };
+const { store, state } = await createOrchestratorStore({
+  mode: autonomyMode,
+  metrics: defaultMetrics
+});
+autonomyMode = state.mode;
+let latestMetrics: AutonomyGateMetrics = state.metrics;
 
 server.get("/health", async () => {
+  const persistenceHealthy = await store.isHealthy();
   const payload: HealthResponse = {
-    status: "healthy",
+    status: persistenceHealthy ? "healthy" : "degraded",
     version: "0.1.0",
     timestamp: new Date().toISOString(),
     checks: {
-      strategy_engine: "healthy"
+      strategy_engine: "healthy",
+      persistence: persistenceHealthy ? "healthy" : "degraded",
+      store_backend: store.backend
     }
   };
   return payload;
@@ -64,6 +74,7 @@ server.put("/v1/autonomy/mode", async (request, reply) => {
   }
 
   autonomyMode = body.mode;
+  await store.setMode(autonomyMode);
   await fetch(`${urls.execution}/v1/internal/autonomy-mode`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -116,6 +127,7 @@ server.put("/v1/autonomy/gate", async (request) => {
     ...body,
     evaluated_at: new Date().toISOString()
   };
+  await store.setMetrics(latestMetrics);
   return { metrics: latestMetrics };
 });
 

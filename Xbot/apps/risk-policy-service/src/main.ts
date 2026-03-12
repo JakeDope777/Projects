@@ -11,6 +11,7 @@ import {
   evaluateRisk,
   estimateOrderNotional
 } from "@xbot/shared-risk";
+import { createRiskStore } from "./store.js";
 
 const server = Fastify({ logger: true });
 await server.register(cors, { origin: true });
@@ -21,7 +22,7 @@ const policies = {
   allowLiveMode: true
 };
 
-const presets = new Map<string, RiskPreset>([
+const seedPresets = new Map<string, RiskPreset>([
   ["conservative", CONSERVATIVE_PRESET],
   [
     "balanced",
@@ -49,15 +50,24 @@ const presets = new Map<string, RiskPreset>([
   ]
 ]);
 
-let activePresetKey = process.env.RISK_PRESET ?? "conservative";
+const defaultActivePresetKey = process.env.RISK_PRESET ?? "conservative";
+const { store, state } = await createRiskStore({
+  presets: seedPresets,
+  activePresetKey: defaultActivePresetKey
+});
+const presets = state.presets;
+let activePresetKey = state.activePresetKey;
 
 server.get("/health", async () => {
+  const persistenceHealthy = await store.isHealthy();
   const payload: HealthResponse = {
-    status: "healthy",
+    status: persistenceHealthy ? "healthy" : "degraded",
     version: "0.1.0",
     timestamp: new Date().toISOString(),
     checks: {
-      policy_store: "healthy"
+      policy_store: "healthy",
+      persistence: persistenceHealthy ? "healthy" : "degraded",
+      store_backend: store.backend
     }
   };
   return payload;
@@ -86,8 +96,14 @@ server.put("/v1/risk/presets/:name", async (request, reply) => {
       details: parsed.error.issues
     });
   }
-  presets.set(name, { ...parsed.data, updated_at: new Date().toISOString() });
+  const persistedPreset = {
+    ...parsed.data,
+    updated_at: new Date().toISOString()
+  };
+  presets.set(name, persistedPreset);
+  await store.savePreset(name, persistedPreset);
   activePresetKey = name;
+  await store.setActivePreset(name);
   return {
     active: activePresetKey,
     preset: presets.get(name)

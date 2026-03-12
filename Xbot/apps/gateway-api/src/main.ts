@@ -173,6 +173,14 @@ server.post("/v1/orders/cancel", async (request, reply) => {
   return reply.code(status).send(payload);
 });
 
+server.get("/v1/orders/:requestId", async (request, reply) => {
+  const { requestId } = request.params as { requestId: string };
+  const { status, payload } = await proxyGet(
+    `${urls.execution}/v1/orders/${requestId}`
+  );
+  return reply.code(status).send(payload);
+});
+
 server.get("/v1/positions", async (_, reply) => {
   const { status, payload } = await proxyGet(`${urls.analytics}/v1/positions`);
   return reply.code(status).send(payload);

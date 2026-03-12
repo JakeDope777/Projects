@@ -3,11 +3,11 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { z } from "zod";
 import type { HealthResponse, Position } from "@xbot/shared-contracts";
+import { createAnalyticsStore } from "./store.js";
 
 const server = Fastify({ logger: true });
 await server.register(cors, { origin: true });
-
-const positions = new Map<string, Position>();
+const store = await createAnalyticsStore();
 
 function summarizePnl(currentPositions: Position[]) {
   const unrealized = currentPositions.reduce((acc, p) => acc + p.unrealized_pnl, 0);
@@ -20,21 +20,25 @@ function summarizePnl(currentPositions: Position[]) {
 }
 
 server.get("/health", async () => {
+  const persistenceHealthy = await store.isHealthy();
   const payload: HealthResponse = {
-    status: "healthy",
+    status: persistenceHealthy ? "healthy" : "degraded",
     version: "0.1.0",
     timestamp: new Date().toISOString(),
     checks: {
-      analytics: "healthy"
+      analytics: "healthy",
+      persistence: persistenceHealthy ? "healthy" : "degraded",
+      store_backend: store.backend
     }
   };
   return payload;
 });
 
 server.get("/v1/positions", async () => {
+  const items = await store.listPositions();
   return {
-    count: positions.size,
-    items: Array.from(positions.values())
+    count: items.length,
+    items
   };
 });
 
@@ -54,7 +58,9 @@ server.post("/v1/positions/upsert", async (request) => {
 
   const positionId = body.position_id ?? randomUUID();
   const now = new Date().toISOString();
-  const existing = positions.get(positionId);
+  const existing = (await store.listPositions()).find(
+    (item) => item.position_id === positionId
+  );
   const position: Position = {
     position_id: positionId,
     market_id: body.market_id,
@@ -67,14 +73,14 @@ server.post("/v1/positions/upsert", async (request) => {
     opened_at: existing?.opened_at ?? now,
     updated_at: now
   };
-  positions.set(positionId, position);
+  await store.upsertPosition(position);
   return {
     position
   };
 });
 
 server.get("/v1/portfolio/pnl", async () => {
-  const currentPositions = Array.from(positions.values());
+  const currentPositions = await store.listPositions();
   const summary = summarizePnl(currentPositions);
   return {
     positions_count: currentPositions.length,
@@ -84,7 +90,7 @@ server.get("/v1/portfolio/pnl", async () => {
 });
 
 server.get("/v1/analytics/overview", async () => {
-  const currentPositions = Array.from(positions.values());
+  const currentPositions = await store.listPositions();
   const pnl = summarizePnl(currentPositions);
   const exposure = currentPositions.reduce(
     (acc, p) => acc + Math.abs(p.quantity * p.mark_price),
@@ -103,7 +109,7 @@ server.get("/v1/analytics/overview", async () => {
 });
 
 server.get("/v1/analytics/pnl", async () => {
-  const currentPositions = Array.from(positions.values());
+  const currentPositions = await store.listPositions();
   return {
     pnl: summarizePnl(currentPositions),
     timestamp: new Date().toISOString()
@@ -111,7 +117,7 @@ server.get("/v1/analytics/pnl", async () => {
 });
 
 server.get("/v1/analytics/risk", async () => {
-  const currentPositions = Array.from(positions.values());
+  const currentPositions = await store.listPositions();
   const grossExposure = currentPositions.reduce(
     (acc, p) => acc + Math.abs(p.quantity * p.mark_price),
     0
